@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>D2 - Ping Tab</title>
+<title>Ringba RTB Transfer</title>
 <style>
   :root{
     --bg:#f3f4f6; --panel:#ffffff; --ink:#111827; --sub:#6b7280; --line:#d9dce1;
@@ -42,10 +42,14 @@
   .line b{color:var(--ink);font-weight:600;text-align:right;overflow-wrap:anywhere}
   .did-label{font-size:12px;color:#3f6b4f;margin-bottom:2px}
   .number{font-size:24px;font-weight:700;color:var(--ink);letter-spacing:.5px;margin:2px 0 4px}
-  .bid-row{display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid rgba(22,101,52,.15)}
+  .bid-row{display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid rgba(22,101,52,.15);gap:12px;flex-wrap:wrap}
   .bid-amount{font-size:20px;font-weight:700;color:var(--ink)}
   .bid-label{font-size:12px;color:#3f6b4f}
   .meta{font-size:12px;color:#3f6b4f;margin-top:8px}
+  .raw-toggle{margin-top:12px;font-size:12.5px;color:var(--accent);cursor:pointer;background:none;border:0;padding:0;font-family:inherit;font-weight:600}
+  .raw-toggle:hover{text-decoration:underline}
+  .raw-box{display:none;margin-top:8px;padding:10px;background:#0f172a;color:#e2e8f0;border-radius:6px;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word;max-height:240px;overflow:auto}
+  .raw-box.open{display:block}
 </style>
 </head>
 <body>
@@ -88,7 +92,6 @@
 (function(){
   "use strict";
 
-  // ★★★ PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE ★★★
   var API_URL = "https://script.google.com/macros/s/AKfycbweZkDzHdJWpecc3Zp21jL89FnJwjhAeRw6n5c01ki23ijMIWV7ero90QzxUOLKjoEd7w/exec";
 
   var TIMEOUT_MS = 25000;
@@ -186,7 +189,6 @@
     .then(function(d){
       if (d.success) {
         var r = d.response || {};
-        // support both object and already-parsed
         if (typeof r === "string") {
           try { r = JSON.parse(r); } catch(e){ r = {}; }
         }
@@ -196,6 +198,18 @@
         var expire = r.expireInSeconds != null ? r.expireInSeconds : null;
         var bidId = r.bidId || "";
 
+        // Buffer time = min call duration from bidTerms (code 100)
+        var buffer = null;
+        if (Array.isArray(r.bidTerms)) {
+          for (var i = 0; i < r.bidTerms.length; i++) {
+            if (r.bidTerms[i] && r.bidTerms[i].callMinDuration != null) {
+              buffer = r.bidTerms[i].callMinDuration;
+              break;
+            }
+          }
+        }
+
+        var rawJson = JSON.stringify(r, null, 2);
         var html = "";
 
         // DID
@@ -207,15 +221,18 @@
           html += '<div class="line"><span>Result</span><b>Sent</b></div>';
         }
 
-        // Bid
+        // Bid / Expire / Buffer
+        html += '<div class="bid-row">';
         if (bid != null) {
-          html += '<div class="bid-row">';
           html += '<div><div class="bid-label">Bid amount</div><div class="bid-amount">$' + esc(bid) + '</div></div>';
-          if (expire != null) {
-            html += '<div style="text-align:right"><div class="bid-label">Expires in</div><div style="font-weight:600;color:var(--ink)">' + esc(expire) + 's</div></div>';
-          }
-          html += '</div>';
         }
+        if (expire != null) {
+          html += '<div><div class="bid-label">Expires in</div><div style="font-weight:600;color:var(--ink)">' + esc(expire) + 's</div></div>';
+        }
+        if (buffer != null) {
+          html += '<div><div class="bid-label">Buffer time</div><div style="font-weight:600;color:var(--ink)">' + esc(buffer) + 's</div></div>';
+        }
+        html += '</div>';
 
         // Meta
         html += '<div class="meta">';
@@ -223,16 +240,28 @@
         if (bidId) html += ' · Bid ID: <b style="color:var(--ink);font-size:11px">' + esc(bidId) + '</b>';
         html += '</div>';
 
+        // RAW toggle (hidden by default)
+        html += '<button type="button" class="raw-toggle" id="rawToggle">Show RAW API response</button>';
+        html += '<pre class="raw-box" id="rawBox">' + esc(rawJson) + '</pre>';
+
         box("good", html);
 
         if (phone) {
           var copyBtn = $("copyBtn");
           if (copyBtn) {
-            // copy raw digits for dialing
             var raw = String(phone).replace(/\D/g, "");
             if (raw.length === 11 && raw.charAt(0) === "1") raw = raw.slice(1);
             copyBtn.addEventListener("click", function(){ copyText(raw.length === 10 ? "+1" + raw : phone, copyBtn); });
           }
+        }
+
+        var rawToggle = $("rawToggle");
+        var rawBox = $("rawBox");
+        if (rawToggle && rawBox) {
+          rawToggle.addEventListener("click", function(){
+            var open = rawBox.classList.toggle("open");
+            rawToggle.textContent = open ? "Hide RAW API response" : "Show RAW API response";
+          });
         }
       } else {
         box("bad", esc(d.error || "Request failed."));
