@@ -28,10 +28,11 @@
   input.err,select.err{border-color:#dc2626}
   .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   @media(max-width:460px){.two{grid-template-columns:1fr}}
-  .note{font-size:12px;color:var(--sub);margin-top:4px}
   .btn{display:block;width:100%;height:40px;margin-top:16px;border:0;border-radius:6px;background:var(--accent);color:#fff;font:600 14px inherit;font-family:inherit;cursor:pointer}
   .btn:hover:not(:disabled){background:var(--accent-d)}
   .btn:disabled{opacity:.55;cursor:default}
+  .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line);margin-top:10px}
+  .btn.ghost:hover:not(:disabled){background:#f9fafb}
   .box{margin-top:14px;padding:11px 13px;border-radius:6px;border:1px solid;font-size:13.5px}
   .box.good{background:var(--good-bg);border-color:var(--good-line);color:var(--good)}
   .box.bad{background:var(--bad-bg);border-color:var(--bad-line);color:var(--bad)}
@@ -39,6 +40,12 @@
   .line + .line{border-top:1px solid rgba(22,101,52,.15)}
   .line span{color:#3f6b4f}
   .line b{color:var(--ink);font-weight:600;text-align:right;overflow-wrap:anywhere}
+  .did-label{font-size:12px;color:#3f6b4f;margin-bottom:2px}
+  .number{font-size:24px;font-weight:700;color:var(--ink);letter-spacing:.5px;margin:2px 0 4px}
+  .bid-row{display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid rgba(22,101,52,.15)}
+  .bid-amount{font-size:20px;font-weight:700;color:var(--ink)}
+  .bid-label{font-size:12px;color:#3f6b4f}
+  .meta{font-size:12px;color:#3f6b4f;margin-top:8px}
 </style>
 </head>
 <body>
@@ -81,7 +88,8 @@
 (function(){
   "use strict";
 
-  var API_URL = "https://script.google.com/macros/s/AKfycbweZkDzHdJWpecc3Zp21jL89FnJwjhAeRw6n5c01ki23ijMIWV7ero90QzxUOLKjoEd7w/exec";
+  // ★★★ PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE ★★★
+  var API_URL = "PASTE_YOUR_APPS_SCRIPT_URL_HERE";
 
   var TIMEOUT_MS = 25000;
   var $ = function(id){ return document.getElementById(id); };
@@ -94,6 +102,32 @@
   }
   function flag(id, on){ $(id).classList.toggle("err", !!on); }
   function box(kind, html){ $("out").innerHTML = '<div class="box ' + kind + '">' + html + '</div>'; }
+
+  function prettyPhone(raw){
+    var d = String(raw || "").replace(/\D/g, "");
+    if (d.length === 11 && d.charAt(0) === "1") d = d.slice(1);
+    if (d.length === 10) return "(" + d.slice(0,3) + ") " + d.slice(3,6) + "-" + d.slice(6);
+    return raw;
+  }
+
+  function copyText(text, btn){
+    function done(ok){
+      btn.textContent = ok ? "Copied!" : "Copy failed";
+      setTimeout(function(){ btn.textContent = "Copy number"; }, 2000);
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(function(){ done(true); }, function(){ done(false); });
+    } else {
+      try {
+        var ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.select();
+        var ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        done(ok);
+      } catch(e){ done(false); }
+    }
+  }
 
   $("zipcode").addEventListener("input", function(){
     this.value = this.value.replace(/\D/g, "").slice(0, 5);
@@ -151,14 +185,55 @@
     })
     .then(function(d){
       if (d.success) {
-        var rows = '<div class="line"><span>Result</span><b>Sent</b></div>'
-                 + '<div class="line"><span>Service</span><b>' + esc(service) + '</b></div>'
-                 + '<div class="line"><span>Status</span><b>' + esc(d.status || "OK") + '</b></div>';
-        if (d.response != null) {
-          var respStr = typeof d.response === "object" ? JSON.stringify(d.response) : String(d.response);
-          rows += '<div class="line"><span>Response</span><b style="font-size:11px;text-align:left">' + esc(respStr) + '</b></div>';
+        var r = d.response || {};
+        // support both object and already-parsed
+        if (typeof r === "string") {
+          try { r = JSON.parse(r); } catch(e){ r = {}; }
         }
-        box("good", rows);
+
+        var phone = r.phoneNumber || r.phoneNumberNoPlus || "";
+        var bid = r.bidAmount != null ? r.bidAmount : null;
+        var expire = r.expireInSeconds != null ? r.expireInSeconds : null;
+        var bidId = r.bidId || "";
+
+        var html = "";
+
+        // DID
+        if (phone) {
+          html += '<div class="did-label">Transfer the caller to</div>';
+          html += '<div class="number" id="didNum">' + esc(prettyPhone(phone)) + '</div>';
+          html += '<button class="btn ghost" id="copyBtn" type="button" style="margin-top:6px">Copy number</button>';
+        } else {
+          html += '<div class="line"><span>Result</span><b>Sent</b></div>';
+        }
+
+        // Bid
+        if (bid != null) {
+          html += '<div class="bid-row">';
+          html += '<div><div class="bid-label">Bid amount</div><div class="bid-amount">$' + esc(bid) + '</div></div>';
+          if (expire != null) {
+            html += '<div style="text-align:right"><div class="bid-label">Expires in</div><div style="font-weight:600;color:var(--ink)">' + esc(expire) + 's</div></div>';
+          }
+          html += '</div>';
+        }
+
+        // Meta
+        html += '<div class="meta">';
+        html += 'Service: <b style="color:var(--ink)">' + esc(service) + '</b>';
+        if (bidId) html += ' · Bid ID: <b style="color:var(--ink);font-size:11px">' + esc(bidId) + '</b>';
+        html += '</div>';
+
+        box("good", html);
+
+        if (phone) {
+          var copyBtn = $("copyBtn");
+          if (copyBtn) {
+            // copy raw digits for dialing
+            var raw = String(phone).replace(/\D/g, "");
+            if (raw.length === 11 && raw.charAt(0) === "1") raw = raw.slice(1);
+            copyBtn.addEventListener("click", function(){ copyText(raw.length === 10 ? "+1" + raw : phone, copyBtn); });
+          }
+        }
       } else {
         box("bad", esc(d.error || "Request failed."));
       }
@@ -174,7 +249,7 @@
       clearTimeout(to);
       busy = false;
       $("submitBtn").disabled = false;
-      $("submitBtn").textContent = "Send Transfer";
+      $("submitBtn").textContent = "Submit";
     });
   });
 })();
